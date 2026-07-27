@@ -26,7 +26,13 @@ Evidence date: 2026-07-27.
 Evidence:
 
 ```text
-Pending execution on a Docker-capable workstation.
+Evidence date: 2026-07-27.
+
+- Docker Compose built and started the API and web containers.
+- Both containers reached healthy status.
+- `/health` and `/api/health` returned healthy responses.
+- `/api/platform` returned service `ecs-release-api` with commit `local`.
+- API ran as UID 10001 and web ran as UID 101.
 ```
 
 ## Gate 3 — Terraform foundation
