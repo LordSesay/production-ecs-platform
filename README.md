@@ -58,9 +58,9 @@ remove the cross-AZ egress dependency.
 
 | Gate | Outcome | Current repository status |
 |---|---|---|
-| 0. Ownership | Original source and Git history | Local Git repository initialized; first user-authored commit pending |
+| 0. Ownership | Original source and Git history | Public repository established; original root commit published |
 | 1. Application | Type checks, tests, production builds | Locally verified |
-| 2. Containers | Non-root images and health contracts | Implemented; Docker runtime verification pending |
+| 2. Containers | Non-root images and health contracts | Locally verified through container health and non-root runtime checks |
 | 3. Foundation | Network, ECR, ECS, ALB, IAM, logging | Implemented; AWS plan/apply pending |
 | 4. First release | Immutable images running on Fargate | Not yet deployed |
 | 5. Automation | Jenkins reproduces a verified release | Implemented; live Jenkins run pending |
