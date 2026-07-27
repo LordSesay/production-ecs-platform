@@ -17,33 +17,51 @@ Evidence date: 2026-07-27.
 
 ## Gate 2 — Containers
 
-- [ ] Web image builds
-- [ ] API image builds
-- [ ] Both containers report healthy in Docker Compose
-- [ ] Same-origin `/api/platform` returns the expected local commit value
-- [ ] Runtime processes are non-root
+- [x] Web image builds
+- [x] API image builds
+- [x] Both containers report healthy in Docker Compose
+- [x] Same-origin `/api/platform` returns the expected local commit value
+- [x] Runtime processes are non-root
 
 Evidence:
 
 ```text
-Pending execution on a Docker-capable workstation.
+Evidence date: 2026-07-27.
+
+- Docker Compose built and started the API and web containers.
+- Both containers reached healthy status.
+- `/health` and `/api/health` returned healthy responses.
+- `/api/platform` returned service `ecs-release-api` with commit `local`.
+- API ran as UID 10001 and web ran as UID 101.
 ```
 
 ## Gate 3 — Terraform foundation
 
-- [ ] `terraform fmt -check` passes
-- [ ] `terraform validate` passes for all four stacks
-- [ ] Foundation plan was reviewed
-- [ ] Public and private subnets exist in two Availability Zones
+- [x] `terraform fmt -check` passes
+- [x] `terraform validate` passes for all four stacks
+- [x] Foundation plan was reviewed
+- [x] Public and private subnets exist in two Availability Zones
 - [ ] ECS tasks have no public IP addresses
-- [ ] ALB is the only application ingress
-- [ ] ECR repositories are immutable and scan on push
-- [ ] Terraform state is encrypted, versioned, blocked from public access, and locked
+- [x] ALB is the only application ingress
+- [x] ECR repositories are immutable and scan on push
+- [x] Terraform state is encrypted, versioned, blocked from public access, and locked
 
 Evidence:
 
 ```text
-Pending AWS plan and apply.
+Evidence date: 2026-07-27.
+
+- Remote Terraform state deployed with versioning, AES-256 encryption,
+  public-access blocking, TLS-only access policy, and native locking.
+- Foundation plan reviewed: 49 added, 0 changed, 0 destroyed.
+- Foundation apply completed successfully.
+- Post-apply Terraform drift check returned exit code 0.
+- ALB reported active, internet-facing, and application type.
+- ECS cluster reported ACTIVE with Container Insights enabled.
+- API and web ECR repositories reported IMMUTABLE, scan-on-push enabled,
+  and AES256 encryption.
+- Four subnets were verified across us-east-1a and us-east-1b with automatic
+  public IP assignment disabled.
 ```
 
 ## Gate 4 — First workload release
