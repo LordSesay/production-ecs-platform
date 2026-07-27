@@ -1,0 +1,14 @@
+aws_region            = "us-east-1"
+project_name          = "ecs-release-console"
+environment           = "prod"
+state_bucket_name     = "replace-with-your-state-bucket"
+foundation_state_key  = "production-ecs-platform/prod/foundation.tfstate"
+web_image_uri         = "123456789012.dkr.ecr.us-east-1.amazonaws.com/ecs-release-console-prod-web:sha-0123456789abcdef"
+api_image_uri         = "123456789012.dkr.ecr.us-east-1.amazonaws.com/ecs-release-console-prod-api:sha-0123456789abcdef"
+application_version   = "0.1.0"
+commit_sha            = "0123456789abcdef"
+web_desired_count     = 2
+api_desired_count     = 2
+minimum_task_count    = 2
+maximum_task_count    = 4
+alarm_sns_topic_arn   = null

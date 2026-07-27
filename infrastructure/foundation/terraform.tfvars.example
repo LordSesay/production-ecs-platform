@@ -1,0 +1,10 @@
+aws_region                 = "us-east-1"
+project_name               = "ecs-release-console"
+environment                = "prod"
+vpc_cidr                   = "10.40.0.0/16"
+availability_zone_count    = 2
+single_nat_gateway         = true
+certificate_arn            = null
+application_domain         = null
+enable_deletion_protection = false
+log_retention_days         = 30

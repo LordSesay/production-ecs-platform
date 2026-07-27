@@ -1,0 +1,3 @@
+aws_region       = "us-east-1"
+project_name     = "production-ecs-platform"
+state_bucket_name = "replace-with-a-globally-unique-name"

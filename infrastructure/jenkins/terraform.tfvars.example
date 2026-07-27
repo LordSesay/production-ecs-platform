@@ -1,0 +1,8 @@
+aws_region           = "us-east-1"
+project_name         = "ecs-release-console"
+environment          = "prod"
+state_bucket_name    = "replace-with-your-state-bucket"
+foundation_state_key = "production-ecs-platform/prod/foundation.tfstate"
+instance_type        = "t3.small"
+root_volume_size_gib = 30
+jenkins_version      = null

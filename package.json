@@ -1,0 +1,16 @@
+{
+  "name": "production-ecs-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Original ECS Fargate application platform with Terraform and Jenkins delivery.",
+  "scripts": {
+    "install:all": "npm ci --prefix apps/api && npm ci --prefix apps/web",
+    "typecheck": "npm run typecheck --prefix apps/api && npm run typecheck --prefix apps/web",
+    "test": "npm test --prefix apps/api && npm test --prefix apps/web",
+    "build": "npm run build --prefix apps/api && npm run build --prefix apps/web",
+    "validate": "npm run typecheck && npm test && npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
