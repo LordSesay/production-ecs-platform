@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from "express";
 import type { ApplicationConfig } from "./config.js";
+import { log } from "./logger.js";
 
 type PlatformResponse = {
   service: string;
@@ -22,24 +23,20 @@ export function createApp(config: ApplicationConfig) {
 
     const startedAt = performance.now();
     response.on("finish", () => {
-      const logEntry = {
+      log.info({
         timestamp: new Date().toISOString(),
         method: request.method,
-        path: request.path,
+        path: log.sanitize(request.path),
         status: response.statusCode,
-        durationMs: Number((performance.now() - startedAt).toFixed(2))
-      };
-      console.info(JSON.stringify(logEntry));
+        durationMs: Number((performance.now() - startedAt).toFixed(2)),
+      });
     });
 
     next();
   });
 
   app.get("/api/health", (_request: Request, response: Response) => {
-    response.status(200).json({
-      status: "healthy",
-      service: config.serviceName
-    });
+    response.status(200).json({ status: "healthy", service: config.serviceName });
   });
 
   app.get("/api/platform", (_request: Request, response: Response<PlatformResponse>) => {
@@ -48,14 +45,12 @@ export function createApp(config: ApplicationConfig) {
       environment: config.environment,
       version: config.version,
       commitSha: config.commitSha,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   });
 
   app.use((_request: Request, response: Response) => {
-    response.status(404).json({
-      error: "not_found"
-    });
+    response.status(404).json({ error: "not_found" });
   });
 
   return app;
