@@ -110,9 +110,11 @@ Pending controlled operational exercises.
 
 Use this only after Gates 2 through 6 have the required evidence:
 
-> Designed and deployed a containerized application platform on Amazon ECS
-> Fargate using Terraform, Docker, Amazon ECR, an Application Load Balancer, and
-> Jenkins-based CI/CD. Automated infrastructure provisioning, immutable image
-> delivery, and ECS service deployments while implementing public/private
-> network segmentation, IAM controls, deployment health checks, and repeatable
-> rollback practices.
+> Built and deployed a container release platform on Amazon ECS Fargate in
+> which every running task traces to an immutable, commit-tagged image and a
+> release that fails verification is rolled back automatically. Provisioned the
+> VPC, ALB, ECR, ECS, KMS-encrypted logging and IAM with Terraform, and
+> delivered releases through a private Jenkins controller that uses a scoped
+> instance role instead of stored AWS keys. Verified with commit-asserting smoke
+> tests, a controlled failed-release exercise, and recorded rollback and
+> scaling evidence.

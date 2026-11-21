@@ -1,160 +1,166 @@
-# Production-Style AWS ECS Application Platform
+# ECS Release Platform
 
-An original platform engineering project that deploys an **ECS Release Console**
-to Amazon ECS Fargate and traces every running release back to an immutable Git
-commit.
+Traceable, self-verifying container releases on Amazon ECS Fargate. Every
+running task maps to one Git commit, and a release that fails verification is
+rolled back automatically.
 
-```text
-GitHub -> Jenkins -> tests -> Docker -> Amazon ECR -> Amazon ECS -> ALB
+**Status:** application, containers and infrastructure code are verified in CI.
+The AWS foundation was deployed and verified on 2026-07-27, then torn down.
+The first workload release, the Jenkins release and the operational exercises
+have not been run yet. See [evidence status](#evidence-status).
+
+## The problem
+
+Small teams that deploy containers by hand lose control of their releases:
+
+- **No release identity.** Mutable tags such as `latest` mean nobody can say
+  exactly which code is serving traffic.
+- **Failures stay live.** A bad deploy keeps serving errors until a person
+  notices it.
+- **Improvised rollback.** Getting back to the last good version depends on
+  memory and console clicks.
+- **Exposed credentials.** CI systems hold long-lived cloud keys that can leak.
+
+This platform closes those gaps for a two-service web application, and it can
+be reused as a pattern for similar workloads.
+
+## What the platform guarantees
+
+Each guarantee is enforced by a specific control and proven by a specific
+check. Status is reported conservatively: *implemented* means the code exists
+and has not been exercised in AWS.
+
+| Guarantee | Mechanism | How it is proven | Status |
+|---|---|---|---|
+| **Every running task traces to one commit** | Images are tagged `sha-<full commit>`; ECR repositories are `IMMUTABLE`, so a tag cannot be overwritten; the task definition injects `COMMIT_SHA`; the API reports it at `/api/platform` | The release passes only if the live API, reached through the ALB, reports the commit that was built | API contract verified locally; ECR immutability verified in AWS (2026-07-27); end-to-end pending Gate 4 |
+| **A failed release does not stay live** | ECS deployment circuit breaker with `rollback = true`; the pipeline records both services' current task definitions and restores them if deployment, stabilization or the smoke test fails | A deliberately broken release that is rolled back ([exercise](docs/operations-runbook.md#controlled-failure-exercise)) | Implemented; Gate 6 pending |
+| **No stored AWS credentials** | Jenkins runs on a private EC2 instance with an instance role scoped to two ECR repositories, two ECS services, and `iam:PassRole` limited to the ECS task and task execution roles and only to `ecs-tasks.amazonaws.com`; IMDSv2 required; operators connect through SSM | IAM policy and security group in [`infrastructure/jenkins`](infrastructure/jenkins); live check in Gate 5 | Implemented; Gate 5 pending |
+| **Only the load balancer is reachable** | Tasks run in private subnets without public IPs; task security groups accept traffic only from the ALB security group; outbound traffic leaves through NAT | Subnet and ingress checks; task network inspection | Subnets and ALB-only ingress verified (2026-07-27); task check pending Gate 4 |
+| **Images with fixable critical vulnerabilities do not ship** | Trivy runs before the push with `--severity CRITICAL --ignore-unfixed --exit-code 1`; ECR also scans on push | Pipeline log | ECR scan-on-push verified (2026-07-27); Trivy gate pending Gate 5 |
+| **Releases cannot change infrastructure** | Terraform owns the network, cluster and baseline task definitions; Jenkins can only register task definition revisions and update the two services, and never runs `terraform apply` | Jenkins IAM policy grants no infrastructure permissions | Implemented |
+| **Containers run with minimal privilege** | Non-root users (UID 10001 and 101); read-only root filesystem with a writable `/tmp` only | CI runs both containers read-only and checks the UIDs | Non-root verified locally (2026-07-27); read-only check in CI |
+| **Losing a task does not take the application down** | Two Availability Zones; at least two tasks per service, scaling to four at 60% CPU; ALB health checks replace unhealthy targets | Stop a task and observe replacement; bounded load test | Implemented; Gate 6 pending |
+
+The commit check reads the API. The web service's commit is carried by its
+image tag and task definition but is not asserted at runtime.
+
+## How a release works
+
+```mermaid
+flowchart LR
+  A["Commit on main"] --> B["Jenkins polls<br/>every 5 minutes"]
+  B --> C["Type checks, tests,<br/>production builds"]
+  C --> D["Build images<br/>sha-&lt;commit&gt;"]
+  D --> E{"Trivy:<br/>fixable CRITICAL?"}
+  E -- "found" --> X["Stop: nothing pushed"]
+  E -- "none" --> F["Push to immutable ECR"]
+  F --> G["Register new task definition<br/>revisions, update services"]
+  G --> H{"Services stable and<br/>/api/platform reports<br/>this commit?"}
+  H -- "yes" --> I["Release complete"]
+  H -- "no" --> R["Restore previous task<br/>definitions for both services"]
 ```
 
-The repository begins with original application source and a new Git history.
-It is not based on a fork. The source is available under the MIT License.
-
-## What this project demonstrates
-
-- Terraform-managed VPC, public and private subnets, NAT, ALB, ECR, ECS, IAM,
-  CloudWatch, autoscaling, and a private Jenkins controller
-- Two independently deployable ECS services across two Availability Zones
-- No public IP addresses or inbound internet access on ECS tasks
-- Immutable `sha-<commit>` ECR tags with scan-on-push and lifecycle policies
-- Jenkins releases through an EC2 instance role rather than stored AWS keys
-- ECS deployment circuit breakers, automated stabilization checks, functional
-  smoke tests, and scripted rollback
-- Remote Terraform state with S3 versioning, encryption, public-access blocking,
-  and native state locking
-
-## Application behavior
-
-The web console calls the API through the same ALB clients use. The API exposes:
-
-| Endpoint | Purpose |
-|---|---|
-| `/api/health` | API and ALB target health |
-| `/api/platform` | Environment, version, service, Git SHA, and timestamp |
-| `/health` | Web container and ALB target health |
-
-This turns deployment identity into a testable runtime contract. A pipeline is
-not successful merely because an image was pushed; the ALB must return the
-expected commit from the deployed API.
+Terraform bootstraps the first release; Jenkins owns every release after that.
+The pipeline is defined in the [`Jenkinsfile`](Jenkinsfile).
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-  GH["GitHub repository"] --> J["Private Jenkins controller"]
-  J --> ECR["Immutable ECR images"]
-  ECR --> ECS["Private ECS Fargate services"]
-  Internet["Application users"] --> ALB["Public ALB"]
-  ALB --> ECS
-  ECS --> CW["CloudWatch logs and alarms"]
+  Users["Users"] --> ALB["Application Load Balancer<br/>public subnets, 2 AZs"]
+  ALB -- "/api/*" --> API["API service<br/>Fargate, private subnets"]
+  ALB -- "/*" --> WEB["Web service<br/>Fargate, private subnets"]
+  API --> CW["CloudWatch logs (KMS)<br/>and alarms"]
+  WEB --> CW
+  J["Jenkins controller<br/>private EC2, SSM access only"] --> ECR["ECR, immutable tags"]
+  J --> ECSAPI["ECS API: register and update"]
+  ECR -. "image pull through NAT" .-> API
+  ECR -. "image pull through NAT" .-> WEB
 ```
 
-The initial cost-conscious lab profile uses one NAT gateway. Setting
-`single_nat_gateway = false` creates one NAT gateway per Availability Zone to
-remove the cross-AZ egress dependency.
+The application is deliberately small, because its job is to make release
+identity observable:
 
-## Delivery gates
+| Endpoint | Purpose |
+|---|---|
+| `/health` | Web container and ALB target health |
+| `/api/health` | API container and ALB target health |
+| `/api/platform` | Service, environment, version, commit SHA and timestamp |
 
-| Gate | Outcome | Current repository status |
+The [architecture record](docs/architecture.md) explains each boundary:
+network, delivery, Jenkins, state and bootstrap.
+
+## Accepted trade-offs
+
+These are deliberate lab choices, each with a defined upgrade path. Details are
+in [explicit limitations](docs/architecture.md#explicit-limitations).
+
+- One NAT gateway, so outbound traffic depends on a single AZ.
+  `single_nat_gateway = false` adds one per AZ.
+- One Jenkins controller, which is not highly available. The workload itself
+  spans two AZs.
+- SCM polling instead of webhooks, because Jenkins has no public ingress.
+- HTTP for the first verification. HTTPS requires an ACM certificate and a DNS
+  record managed outside this stack.
+
+## Evidence status
+
+| Gate | Proves | Status |
 |---|---|---|
-| 0. Ownership | Original source and Git history | Public repository established; original root commit published |
-| 1. Application | Type checks, tests, production builds | Locally verified |
-| 2. Containers | Non-root images and health contracts | Locally verified through container health and non-root runtime checks |
-| 3. Foundation | Network, ECR, ECS, ALB, IAM, logging | AWS deployment verified; workload deployment pending |
-| 4. First release | Immutable images running on Fargate | Not yet deployed |
-| 5. Automation | Jenkins reproduces a verified release | Implemented; live Jenkins run pending |
-| 6. Operations | Failure, alarm, scaling, rollback evidence | Runbook implemented; live exercise pending |
+| 1. Application | Type checks, tests, production builds | Verified locally and in CI |
+| 2. Containers | Images build, health contracts, non-root runtime | Verified locally and in CI |
+| 3. Foundation | Network, ECR, ALB, ECS cluster, IAM, state | Deployed and verified 2026-07-27; since torn down |
+| 4. First release | Commit-tagged images running on Fargate behind the ALB | Not yet run |
+| 5. Automated release | Jenkins builds, scans, deploys and verifies a new commit | Not yet run |
+| 6. Operations | Failed release rolled back, alarms, scaling | Not yet run |
 
-The project intentionally distinguishes **implemented**, **locally verified**,
-and **AWS deployment-verified**. See
-[deployment evidence](docs/deployment-evidence.md).
+Each checkbox in [deployment evidence](docs/deployment-evidence.md) is ticked
+only after the output has been produced in the target AWS account.
 
-## Repository layout
+## Run it
 
-```text
-apps/
-  api/                       Express and TypeScript metadata API
-  web/                       React and TypeScript release console
-infrastructure/
-  bootstrap-state/           Protected S3 Terraform state bucket
-  foundation/                VPC, ECR, ALB, ECS cluster, IAM, logs
-  workload/                  Task definitions, services, scaling, alarms
-  jenkins/                   Private EC2 controller, SSM, deployment IAM
-scripts/
-  bootstrap-platform.sh      Ordered first deployment
-  build-and-push.sh          Immutable image publication
-  deploy-service.sh          New ECS task revision registration
-  rollback-service.sh        Explicit task revision rollback
-  smoke-test.sh              ALB and deployed-commit verification
-  teardown-platform.sh       Ordered destroy; retains the state bucket
-Jenkinsfile                  Repeatable application release pipeline
-docs/                        Architecture, setup, operations, evidence
-```
-
-## Local validation
-
-Requirements: Node.js 22 or newer, npm, Docker, and Docker Compose.
+**Locally** (Node.js 22+, Docker with Compose):
 
 ```bash
-npm run install:all
-npm run validate
+npm run install:all && npm run validate
 docker compose up --build
-```
-
-Then verify:
-
-```bash
-curl http://localhost:8080/health
-curl http://localhost:8080/api/health
 curl http://localhost:8080/api/platform
 ```
 
-Stop the local environment with:
+**On AWS:** follow the [deployment runbook](docs/deployment-runbook.md). The
+ordered bootstrap is `scripts/bootstrap-platform.sh`, and the ordered teardown
+is `scripts/teardown-platform.sh`. Both keep every `terraform apply` and
+`terraform destroy` interactive.
 
-```bash
-docker compose down
+The environment is billable while it exists: a NAT gateway, the ALB, four
+Fargate tasks, an EC2 Jenkins controller, ECR storage and CloudWatch logs.
+Tear it down when you are not using it.
+
+## Repository map
+
+```text
+apps/api/                      Express + TypeScript metadata API
+apps/web/                      React + TypeScript release console
+infrastructure/bootstrap-state Protected S3 state bucket
+infrastructure/foundation      VPC, ALB, ECR, ECS cluster, IAM, KMS-encrypted logs
+infrastructure/workload        Task definitions, services, autoscaling, alarms
+infrastructure/jenkins         Private controller, SSM access, release IAM
+scripts/                       Bootstrap, build/push, deploy, rollback, smoke test, teardown
+Jenkinsfile                    Release pipeline
 ```
 
-## AWS deployment
+## Documentation
 
-Start with the [deployment runbook](docs/deployment-runbook.md). It explains
-the prerequisites, remote state bootstrap, Terraform review points, first image
-release, workload deployment, and Jenkins setup in dependency order.
+Each document owns one subject. The README links to them rather than repeating
+them.
 
-The automated bootstrap requires an explicit cost acknowledgment and still
-leaves each `terraform apply` interactive:
+| Document | Owns |
+|---|---|
+| [Architecture](docs/architecture.md) | Boundaries, decisions and limitations |
+| [Implementation workflow](docs/implementation-workflow.md) | Gate definitions and exit criteria |
+| [Deployment runbook](docs/deployment-runbook.md) | First deployment, step by step |
+| [Jenkins setup](docs/jenkins-setup.md) | Controller access, job and parameters |
+| [Operations runbook](docs/operations-runbook.md) | Health, rollback, exercises, teardown |
+| [Deployment evidence](docs/deployment-evidence.md) | Dated proof for each gate |
 
-```bash
-export AWS_REGION="us-east-1"
-export TF_STATE_BUCKET="replace-with-a-globally-unique-name"
-export PROJECT_NAME="ecs-release-console"
-export ENVIRONMENT="prod"
-export APP_VERSION="0.1.0"
-export CONFIRM_AWS_CHARGES="yes"
-
-scripts/check-prerequisites.sh
-scripts/bootstrap-platform.sh
-```
-
-This environment creates billable AWS resources, including a NAT gateway, ALB,
-Fargate tasks, ECR storage, CloudWatch logs, and an EC2 Jenkins controller.
-Review every plan and destroy lab resources when they are no longer required
-with `scripts/teardown-platform.sh` (see the
-[operations runbook](docs/operations-runbook.md#destruction-order)).
-
-## Engineering boundary
-
-Terraform owns durable infrastructure and the bootstrap task definitions.
-Jenkins owns application releases after bootstrap. The Jenkins pipeline does
-not run `terraform apply`, edit network resources, or store long-lived AWS
-access keys.
-
-Read:
-
-- [Architecture decision](docs/architecture.md)
-- [Implementation workflow](docs/implementation-workflow.md)
-- [Deployment runbook](docs/deployment-runbook.md)
-- [Jenkins setup](docs/jenkins-setup.md)
-- [Operations runbook](docs/operations-runbook.md)
-- [Deployment evidence](docs/deployment-evidence.md)
+Original source and Git history; not a fork. MIT License.

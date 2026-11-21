@@ -2,9 +2,10 @@
 
 ## Purpose
 
-Build a production-style, cost-conscious ECS application platform that clearly
-demonstrates networking, containers, infrastructure as code, IAM, continuous
-delivery, and operational verification.
+Give a small team traceable, self-verifying container releases on AWS at lab
+cost. The problem and the guarantees are defined once, in the
+[README](../README.md#what-the-platform-guarantees). This record explains the
+boundaries that enforce those guarantees and the trade-offs accepted.
 
 ## Application boundary
 
