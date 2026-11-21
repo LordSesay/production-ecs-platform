@@ -25,9 +25,10 @@ services:
   web:
     build:
       context: ./apps/web
+    # Read-only root like ECS. No tmpfs here: an empty tmpfs would hide the
+    # nginx temp directories the image prepares for uid 101. The image's
+    # VOLUME ["/tmp"] is seeded from those directories, as the ECS volume is.
     read_only: true
-    tmpfs:
-      - /tmp
     depends_on:
       api:
         condition: service_healthy
