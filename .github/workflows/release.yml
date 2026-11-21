@@ -1,0 +1,155 @@
+name: Release
+
+# Releases only a commit that CI has already verified: a successful CI run for
+# a push to main. Pull requests and forks can never reach this job.
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# One release at a time. A newer queued release replaces an older queued one;
+# a release in progress is never cancelled midway.
+concurrency:
+  group: release-prod
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: Release to prod
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # The environment's required reviewer approves the release before AWS
+    # credentials exist. The IAM trust policy only accepts tokens issued to
+    # jobs in this environment.
+    environment:
+      name: prod
+      url: ${{ steps.targets.outputs.application_url }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      NAME_PREFIX: ${{ vars.NAME_PREFIX }}
+      APP_ENVIRONMENT: ${{ vars.APP_ENVIRONMENT || 'prod' }}
+      APP_VERSION: ${{ vars.APP_VERSION || '0.1.0' }}
+      COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
+      # Not affected by the March 2026 Trivy compromise (v0.69.4-v0.69.6).
+      # Pin by digest: docker buildx imagetools inspect aquasec/trivy:0.66.0
+      TRIVY_IMAGE: aquasec/trivy:0.66.0
+    steps:
+      # Actions in this job receive AWS credentials, so they are pinned to
+      # full commit SHAs rather than movable tags.
+      - name: Check out the commit CI verified
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Require environment configuration
+        env:
+          AWS_RELEASE_ROLE_ARN: ${{ vars.AWS_RELEASE_ROLE_ARN }}
+        run: |
+          set -Eeuo pipefail
+          for var in AWS_RELEASE_ROLE_ARN AWS_REGION NAME_PREFIX; do
+            if [[ -z ${!var} ]]; then
+              printf '::error::Set the %s variable on the prod environment.\n' "${var}"
+              exit 1
+            fi
+          done
+
+      - name: Assume the release role through OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: release-${{ github.run_id }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+
+      - name: Resolve release targets
+        id: targets
+        env:
+          APPLICATION_URL_OVERRIDE: ${{ vars.APPLICATION_URL }}
+        run: |
+          set -Eeuo pipefail
+          account_id=$(aws sts get-caller-identity --query Account --output text)
+          printf '::add-mask::%s\n' "${account_id}"
+          registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          if [[ -n ${APPLICATION_URL_OVERRIDE} ]]; then
+            application_url=${APPLICATION_URL_OVERRIDE%/}
+          else
+            alb_dns_name=$(
+              aws elbv2 describe-load-balancers \
+                --names "${NAME_PREFIX}-alb" \
+                --query 'LoadBalancers[0].DNSName' \
+                --output text
+            )
+            application_url="http://${alb_dns_name}"
+          fi
+
+          {
+            printf 'WEB_REPOSITORY=%s\n' "${registry}/${NAME_PREFIX}-web"
+            printf 'API_REPOSITORY=%s\n' "${registry}/${NAME_PREFIX}-api"
+            printf 'WEB_IMAGE_URI=%s\n' "${registry}/${NAME_PREFIX}-web:sha-${COMMIT_SHA}"
+            printf 'API_IMAGE_URI=%s\n' "${registry}/${NAME_PREFIX}-api:sha-${COMMIT_SHA}"
+            printf 'ECS_CLUSTER=%s\n' "${NAME_PREFIX}"
+            printf 'WEB_ECS_SERVICE=%s\n' "${NAME_PREFIX}-web"
+            printf 'API_ECS_SERVICE=%s\n' "${NAME_PREFIX}-api"
+            printf 'APPLICATION_URL=%s\n' "${application_url}"
+          } >> "${GITHUB_ENV}"
+          printf 'application_url=%s\n' "${application_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Confirm both services exist
+        run: |
+          set -Eeuo pipefail
+          found=$(
+            aws ecs describe-services \
+              --cluster "${ECS_CLUSTER}" \
+              --services "${API_ECS_SERVICE}" "${WEB_ECS_SERVICE}" \
+              --query "length(services[?status=='ACTIVE'])" \
+              --output text
+          )
+          test "${found}" = "2"
+
+      - name: Build images
+        run: |
+          SKIP_PUSH=true scripts/build-and-push.sh \
+            "${AWS_REGION}" "${WEB_REPOSITORY}" "${API_REPOSITORY}" "${COMMIT_SHA}"
+
+      - name: Scan images (block fixable CRITICAL vulnerabilities)
+        run: |
+          set -Eeuo pipefail
+          docker pull --quiet "${TRIVY_IMAGE}"
+          for image in "${WEB_IMAGE_URI}" "${API_IMAGE_URI}"; do
+            docker run --rm \
+              --volume /var/run/docker.sock:/var/run/docker.sock \
+              "${TRIVY_IMAGE}" image \
+              --exit-code 1 \
+              --ignore-unfixed \
+              --severity CRITICAL \
+              "${image}"
+          done
+
+      - name: Push immutable images
+        run: |
+          SKIP_BUILD=true scripts/build-and-push.sh \
+            "${AWS_REGION}" "${WEB_REPOSITORY}" "${API_REPOSITORY}" "${COMMIT_SHA}"
+
+      - name: Deploy, verify, roll back on failure
+        run: RELEASE_SUMMARY_FILE="${GITHUB_STEP_SUMMARY}" scripts/release-services.sh

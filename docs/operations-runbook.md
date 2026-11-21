@@ -75,14 +75,37 @@ Always verify the application after rollback.
 
 Do not run this exercise during a real production event.
 
+The exercise runs the same `release-services.sh` the release workflow uses, from
+your own machine, so `main` is never broken.
+
 1. Record both current task definition ARNs.
-2. Create a feature branch that intentionally changes the API container health
-   path to a nonexistent endpoint.
-3. Run the pipeline and observe the failed deployment.
-4. Confirm the ECS circuit breaker reports rollback.
-5. Confirm the Jenkins rollback handler restores both previous task revisions.
-6. Run the smoke test and capture sanitized evidence.
-7. Revert the intentional change before merging.
+2. On a throwaway branch, break the API: for example, make `/api/health` return
+   HTTP 500. Commit it, but do not merge it.
+3. Build and push images for that commit:
+
+   ```bash
+   broken_sha=$(git rev-parse HEAD)
+   scripts/build-and-push.sh "${AWS_REGION}" "${WEB_REPOSITORY}" "${API_REPOSITORY}" "${broken_sha}"
+   ```
+
+4. Release it by hand:
+
+   ```bash
+   export ECS_CLUSTER="ecs-release-console-prod"
+   export API_ECS_SERVICE="${ECS_CLUSTER}-api" WEB_ECS_SERVICE="${ECS_CLUSTER}-web"
+   export API_IMAGE_URI="${API_REPOSITORY}:sha-${broken_sha}"
+   export WEB_IMAGE_URI="${WEB_REPOSITORY}:sha-${broken_sha}"
+   export APP_ENVIRONMENT="prod" APP_VERSION="failure-exercise" COMMIT_SHA="${broken_sha}"
+   export APPLICATION_URL="http://<alb-dns-name>"
+   scripts/release-services.sh
+   ```
+
+5. Expect a non-zero exit, `Release failed; restoring both previous task
+   definitions.` and two `Rolled back` lines. Check the service events for the
+   ECS circuit breaker.
+6. Confirm both services are back on the task definitions from step 1, then
+   run `scripts/smoke-test.sh "${APPLICATION_URL}"` and capture sanitized output.
+7. Delete the throwaway branch.
 
 ## Scaling exercise
 
@@ -99,15 +122,29 @@ the existence of a Terraform policy.
 
 ## Destruction order
 
-Remove resources in reverse dependency order:
+Use the ordered teardown, which keeps every `terraform destroy` interactive:
 
 ```bash
-terraform -chdir=infrastructure/jenkins destroy
-terraform -chdir=infrastructure/workload destroy
-terraform -chdir=infrastructure/foundation destroy
+export AWS_REGION="us-east-1"
+export TF_STATE_BUCKET="your-state-bucket"
+export PROJECT_NAME="ecs-release-console"
+export ENVIRONMENT="prod"
+export CONFIRM_DESTROY="ecs-release-console-prod"   # must equal <project>-<environment>
+
+scripts/teardown-platform.sh
 ```
 
-The state bucket is protected by `prevent_destroy`. Retain it for audit and
-recovery, or remove the protection only after confirming all downstream state
-is no longer needed. ECR repositories use `force_delete = false`; delete images
-deliberately before destroying the foundation.
+It runs, in order:
+
+1. `github-release` destroy (set `CREATE_OIDC_PROVIDER=false` if the stack
+   did not create the account's OIDC provider)
+2. `workload` destroy, passing the currently running image URIs, because the
+   stack's `aws_ecr_image` lookups need existing tags even during destroy
+   (override with `WEB_IMAGE_URI` / `API_IMAGE_URI` if the services are gone)
+3. ECR image purge, required because repositories use `force_delete = false`
+4. `foundation` destroy
+
+The state bucket is protected by `prevent_destroy` and is retained. Remove the
+protection only after confirming no downstream state is needed. The logs KMS
+key enters a 7-day pending-deletion window. If `enable_deletion_protection` was
+set to `true`, set it back to `false` and apply before tearing down.

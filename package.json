@@ -2,7 +2,7 @@
   "name": "production-ecs-platform",
   "version": "0.1.0",
   "private": true,
-  "description": "Original ECS Fargate application platform with Terraform and Jenkins delivery.",
+  "description": "Traceable, self-verifying container releases on ECS Fargate with Terraform and GitHub Actions.",
   "scripts": {
     "install:all": "npm ci --prefix apps/api && npm ci --prefix apps/web",
     "typecheck": "npm run typecheck --prefix apps/api && npm run typecheck --prefix apps/web",

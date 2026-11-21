@@ -78,18 +78,19 @@ Evidence:
 Pending first AWS workload release.
 ```
 
-## Gate 5 — Jenkins release
+## Gate 5 — Automated release (GitHub Actions)
 
-- [ ] Jenkins is private and reachable only through SSM
-- [ ] Jenkins has no static AWS access keys
-- [ ] SCM polling detects a new Git commit
-- [ ] Test, scan, push, deploy, stabilize, and smoke stages pass
-- [ ] Git SHA maps to ECR tags and ECS task revisions
+- [ ] The repository holds no AWS access-key secrets
+- [ ] CloudTrail shows `AssumeRoleWithWebIdentity` for the release role from
+      `token.actions.githubusercontent.com`
+- [ ] A push to `main` ran CI, then waited for `prod` approval before release
+- [ ] Build, scan, push, deploy, stabilize, and smoke steps pass
+- [ ] The run summary maps the Git SHA to ECR tags and ECS task revisions
 
 Evidence:
 
 ```text
-Pending live Jenkins build.
+Pending first release workflow run.
 ```
 
 ## Gate 6 — Operations
@@ -110,9 +111,11 @@ Pending controlled operational exercises.
 
 Use this only after Gates 2 through 6 have the required evidence:
 
-> Designed and deployed a containerized application platform on Amazon ECS
-> Fargate using Terraform, Docker, Amazon ECR, an Application Load Balancer, and
-> Jenkins-based CI/CD. Automated infrastructure provisioning, immutable image
-> delivery, and ECS service deployments while implementing public/private
-> network segmentation, IAM controls, deployment health checks, and repeatable
-> rollback practices.
+> Built and deployed a container release platform on Amazon ECS Fargate in
+> which every running task traces to an immutable, commit-tagged image and a
+> release that fails verification is rolled back automatically. Provisioned the
+> VPC, ALB, ECR, ECS, KMS-encrypted logging and IAM with Terraform, and
+> delivered releases through GitHub Actions using OIDC federation to a scoped,
+> environment-restricted IAM role instead of stored AWS keys. Verified with commit-asserting smoke
+> tests, a controlled failed-release exercise, and recorded rollback and
+> scaling evidence.

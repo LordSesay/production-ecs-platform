@@ -49,13 +49,13 @@ ECR URLs, cluster, ALB, and deployer role.
 Exit condition: the ALB serves the console and the API reports the deployed
 commit.
 
-## Gate 5 — Jenkins CI/CD
+## Gate 5 — Automated release (GitHub Actions)
 
-- Run Jenkins with an IAM role instead of long-lived AWS keys.
-- Store no credentials in the Jenkinsfile or repository.
-- Detect GitHub changes through SCM polling from the private controller.
-- Test, build, scan, push, deploy, wait, and smoke-test.
-- Serialize production deployment stages.
+- Assume the release role through OIDC; store no AWS keys in GitHub.
+- Restrict the role's trust policy to the `prod` environment of this repository.
+- Release only commits whose CI run passed on `main`, after reviewer approval.
+- Build, scan, push, deploy, wait, and smoke-test.
+- Serialize releases.
 
 Exit condition: a new source commit is deployed without manual AWS console
 changes and can be traced from Git commit to ECS task revision.

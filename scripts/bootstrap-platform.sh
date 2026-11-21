@@ -58,11 +58,17 @@ tf_deploy workload "${base_key}/workload.tfstate" \
 application_url=$(terraform -chdir=infrastructure/workload output -raw application_url)
 scripts/smoke-test.sh "${application_url}" "${commit_sha}"
 
-tf_deploy jenkins "${base_key}/jenkins.tfstate" \
+# The GitHub release role is the only identity that releases after bootstrap.
+# Set CREATE_OIDC_PROVIDER=false if the account already has the GitHub provider.
+tf_deploy github-release "${base_key}/github-release.tfstate" \
   -var="state_bucket_name=${TF_STATE_BUCKET}" \
-  -var="foundation_state_key=${base_key}/foundation.tfstate"
+  -var="foundation_state_key=${base_key}/foundation.tfstate" \
+  -var="create_oidc_provider=${CREATE_OIDC_PROVIDER:-true}"
 
 printf '\nBootstrap complete.\n'
 printf 'Application URL: %s\n' "${application_url}"
-printf 'Jenkins access command:\n%s\n' \
-  "$(terraform -chdir=infrastructure/jenkins output -raw ssm_tunnel_command)"
+printf '\nOn the GitHub "prod" environment, set these variables:\n'
+printf '  AWS_RELEASE_ROLE_ARN = %s\n' "$(terraform -chdir=infrastructure/github-release output -raw release_role_arn)"
+printf '  AWS_REGION           = %s\n' "${AWS_REGION}"
+printf '  NAME_PREFIX          = %s\n' "${PROJECT_NAME}-${ENVIRONMENT}"
+printf 'See docs/deployment-runbook.md, "Connect GitHub Actions".\n'

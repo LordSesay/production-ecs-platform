@@ -62,7 +62,7 @@ jobs:
       - name: Initialize and validate stacks
         run: |
           set -Eeuo pipefail
-          for stack in bootstrap-state foundation jenkins workload; do
+          for stack in bootstrap-state foundation workload github-release; do
             echo "Validating infrastructure/${stack}"
             terraform -chdir="infrastructure/${stack}" init \
               -backend=false \
@@ -84,6 +84,17 @@ jobs:
           for script in scripts/*.sh; do
             bash -n "${script}"
           done
+
+      # The release workflow and bootstrap-platform.sh execute these directly. Commits made
+      # from Windows drop the executable bit unless it is set in the index.
+      - name: Require executable scripts
+        run: |
+          set -Eeuo pipefail
+          non_executable=$(git ls-files -s scripts/*.sh | awk '$1 != "100755" {print $4}')
+          if [[ -n ${non_executable} ]]; then
+            printf 'Not executable in Git (fix: git update-index --chmod=+x <file>):\n%s\n' "${non_executable}" >&2
+            exit 1
+          fi
 
   containers:
     name: Containers
@@ -107,6 +118,14 @@ jobs:
           curl --fail --silent --show-error http://localhost:8080/api/platform
           test "$(docker compose exec -T api id -u)" = "10001"
           test "$(docker compose exec -T web id -u)" = "101"
+          # ECS runs both containers with readonlyRootFilesystem = true.
+          # (set -e ignores a failing "! cmd", so test explicitly.)
+          for service in api web; do
+            if docker compose exec -T "${service}" touch /readonly-probe 2>/dev/null; then
+              printf '%s root filesystem is writable.\n' "${service}" >&2
+              exit 1
+            fi
+          done
 
       - name: Show service diagnostics
         if: failure()
