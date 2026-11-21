@@ -110,7 +110,7 @@ resource "aws_ecs_service" "service" {
   }
 
   lifecycle {
-    # Jenkins owns release revisions after the Terraform bootstrap release.
+    # The GitHub Actions release workflow owns revisions after the bootstrap release.
     ignore_changes = [task_definition]
   }
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Destroys the billable platform in reverse dependency order:
-#   jenkins -> workload -> ECR images -> foundation
+#   github-release -> workload -> ECR images -> foundation
 # The Terraform state bucket is retained on purpose (prevent_destroy).
 # Each terraform destroy stays interactive so the plan is reviewed first.
 set -Eeuo pipefail
@@ -90,12 +90,14 @@ purge_repository() {
   printf 'Purged images from %s.\n' "${repository}"
 }
 
-printf '\n== 1/4 Jenkins controller ==\n'
-tf_init jenkins "${base_key}/jenkins.tfstate"
-if has_resources jenkins; then
-  terraform -chdir=infrastructure/jenkins destroy "${common_vars[@]}" "${downstream_vars[@]}"
+printf '\n== 1/4 GitHub release role ==\n'
+tf_init github-release "${base_key}/github-release.tfstate"
+if has_resources github-release; then
+  terraform -chdir=infrastructure/github-release destroy \
+    "${common_vars[@]}" "${downstream_vars[@]}" \
+    -var="create_oidc_provider=${CREATE_OIDC_PROVIDER:-true}"
 else
-  printf 'No Jenkins resources in state; skipping.\n'
+  printf 'No GitHub release resources in state; skipping.\n'
 fi
 
 printf '\n== 2/4 Workload services ==\n'

@@ -62,7 +62,7 @@ jobs:
       - name: Initialize and validate stacks
         run: |
           set -Eeuo pipefail
-          for stack in bootstrap-state foundation jenkins workload; do
+          for stack in bootstrap-state foundation workload github-release; do
             echo "Validating infrastructure/${stack}"
             terraform -chdir="infrastructure/${stack}" init \
               -backend=false \
@@ -85,7 +85,7 @@ jobs:
             bash -n "${script}"
           done
 
-      # Jenkins and bootstrap-platform.sh execute these directly. Commits made
+      # The release workflow and bootstrap-platform.sh execute these directly. Commits made
       # from Windows drop the executable bit unless it is set in the index.
       - name: Require executable scripts
         run: |

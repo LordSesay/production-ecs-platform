@@ -27,25 +27,25 @@ variable "foundation_state_key" {
   default     = "production-ecs-platform/prod/foundation.tfstate"
 }
 
-variable "instance_type" {
-  description = "EC2 size for the single-node Jenkins controller."
+variable "github_repository" {
+  description = "GitHub repository allowed to release, as <owner>/<repo>. Case-sensitive: it must match the OIDC sub claim exactly."
   type        = string
-  default     = "t3.small"
-}
-
-variable "root_volume_size_gib" {
-  description = "Encrypted gp3 root volume size."
-  type        = number
-  default     = 30
+  default     = "LordSesay/production-ecs-platform"
 
   validation {
-    condition     = var.root_volume_size_gib >= 20
-    error_message = "root_volume_size_gib must be at least 20 GiB."
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "github_repository must look like <owner>/<repo>."
   }
 }
 
-variable "jenkins_version" {
-  description = "Jenkins RPM package version (2.541.1 or newer, which the bootstrap's 2026 signing key covers). Set null to install the current LTS package."
+variable "github_environment" {
+  description = "GitHub Actions environment whose jobs may assume the release role."
   type        = string
-  default     = null
+  default     = "prod"
+}
+
+variable "create_oidc_provider" {
+  description = "Create the account's GitHub OIDC provider. Set false if it already exists in this account."
+  type        = bool
+  default     = true
 }

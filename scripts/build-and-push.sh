@@ -32,9 +32,6 @@ for command_name in aws docker; do
   }
 done
 
-aws ecr get-login-password --region "${aws_region}" |
-  docker login --username AWS --password-stdin "${registry}"
-
 if [[ ${SKIP_BUILD:-false} != "true" ]]; then
   docker build \
     --label "org.opencontainers.image.revision=${commit_sha}" \
@@ -46,6 +43,16 @@ if [[ ${SKIP_BUILD:-false} != "true" ]]; then
     --tag "${api_image}" \
     apps/api
 fi
+
+# SKIP_PUSH=true builds only, so images can be scanned before anything is
+# published. SKIP_BUILD=true pushes images that were already built and scanned.
+if [[ ${SKIP_PUSH:-false} == "true" ]]; then
+  printf 'Built %s and %s; push skipped.\n' "${web_image}" "${api_image}"
+  exit 0
+fi
+
+aws ecr get-login-password --region "${aws_region}" |
+  docker login --username AWS --password-stdin "${registry}"
 
 push_if_absent() {
   local repository_url=$1

@@ -173,11 +173,58 @@ APPLICATION_URL="$(
 scripts/smoke-test.sh "${APPLICATION_URL}" "${COMMIT_SHA}"
 ```
 
-## 8. Apply and configure Jenkins
+## 8. Connect GitHub Actions
 
-Follow [Jenkins setup](jenkins-setup.md). Do not create AWS access-key
-credentials in Jenkins; the EC2 instance profile already provides the bounded
-release permissions.
+Releases after bootstrap run in `.github/workflows/release.yml`. The workflow
+gets short-lived AWS credentials through OIDC; no AWS keys are stored in GitHub.
+
+Create `github-release-backend.hcl` with the release-role state key:
+
+```hcl
+bucket       = "your-state-bucket"
+key          = "production-ecs-platform/prod/github-release.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true
+```
+
+Copy `infrastructure/github-release/terraform.tfvars.example` to
+`terraform.tfvars` and set `state_bucket_name`. Then apply and read the role ARN:
+
+```bash
+terraform -chdir=infrastructure/github-release init \
+  -backend-config=/absolute/path/to/github-release-backend.hcl
+terraform -chdir=infrastructure/github-release plan
+terraform -chdir=infrastructure/github-release apply
+terraform -chdir=infrastructure/github-release output -raw release_role_arn
+```
+
+Review the plan: it should create one OIDC provider, one IAM role and one
+inline policy, and nothing else.
+
+If the apply fails with `EntityAlreadyExists` for the OIDC provider, the account
+already has one: rerun with `-var="create_oidc_provider=false"`.
+
+Then, in the GitHub repository settings:
+
+1. **Environments → New environment → `prod`.**
+2. **Required reviewers:** add yourself. Every release waits for approval before
+   any AWS credentials are issued.
+3. **Deployment branches and tags:** selected branches only, `main`.
+4. **Environment variables** (variables, not secrets, because none are secret):
+
+   | Variable | Value |
+   |---|---|
+   | `AWS_RELEASE_ROLE_ARN` | The `release_role_arn` output |
+   | `AWS_REGION` | `us-east-1` |
+   | `NAME_PREFIX` | `ecs-release-console-prod` |
+   | `APPLICATION_URL` | Optional. Leave unset to use the ALB DNS name over HTTP. |
+
+5. Confirm the repository has **no** AWS access-key secrets.
+
+**Verify:** push a small commit to `main`. CI runs, then **Release** waits for
+your approval. After you approve, the run's summary shows the commit, both image
+URIs and both task definition revisions, with account IDs redacted.
 
 ## 9. Automated alternative
 
@@ -194,6 +241,9 @@ export CONFIRM_AWS_CHARGES="yes"
 
 scripts/bootstrap-platform.sh
 ```
+
+The wrapper ends by applying the GitHub release role and printing the
+environment variables to set in step 8.
 
 ## 10. Evidence and claim gate
 

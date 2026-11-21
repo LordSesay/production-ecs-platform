@@ -8,7 +8,7 @@ type ViewState =
   | { status: "ready"; metadata: PlatformMetadata }
   | { status: "error"; message: string };
 
-const workflow = ["GitHub", "Jenkins", "Amazon ECR", "ECS Fargate"];
+const workflow = ["GitHub", "Actions + OIDC", "Amazon ECR", "ECS Fargate"];
 
 export default function App() {
   const [viewState, setViewState] = useState<ViewState>({ status: "loading" });

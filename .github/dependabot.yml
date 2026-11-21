@@ -39,8 +39,8 @@ updates:
     directories:
       - /infrastructure/bootstrap-state
       - /infrastructure/foundation
-      - /infrastructure/jenkins
       - /infrastructure/workload
+      - /infrastructure/github-release
     schedule:
       interval: weekly
       day: monday
