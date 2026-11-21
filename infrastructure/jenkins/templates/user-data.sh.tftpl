@@ -4,10 +4,13 @@ set -Eeuo pipefail
 exec > >(tee /var/log/jenkins-bootstrap.log | logger -t jenkins-bootstrap -s 2>/dev/console) 2>&1
 
 dnf update -y
-dnf install -y docker git jq java-21-amazon-corretto-headless wget
+dnf install -y docker git jq fontconfig java-21-amazon-corretto-headless wget
 
-wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
-rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+# Jenkins LTS 2.541.1+ (January 2026) is signed with the 2026 repository key and
+# is published under rpm-stable. The 2023 key from redhat-stable fails the GPG
+# check for current LTS packages.
+wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/rpm-stable/jenkins.repo
+rpm --import https://pkg.jenkins.io/rpm-stable/jenkins.io-2026.key
 dnf install -y ${jenkins_package}
 
 systemctl enable --now docker

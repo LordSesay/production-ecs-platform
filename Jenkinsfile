@@ -14,18 +14,24 @@ pipeline {
   }
 
   parameters {
+    // SCM-polled builds always run with these defaults, so every value must
+    // either have a working default or be derivable from NAME_PREFIX.
     string(name: 'AWS_REGION', defaultValue: 'us-east-1', description: 'AWS Region containing ECR and ECS.')
-    string(name: 'WEB_ECR_REPOSITORY', defaultValue: '', description: 'Full ECR repository URL for the web service.')
-    string(name: 'API_ECR_REPOSITORY', defaultValue: '', description: 'Full ECR repository URL for the API service.')
+    string(name: 'NAME_PREFIX', defaultValue: 'ecs-release-console-prod', description: 'Foundation name_prefix output (<project_name>-<environment>).')
+    string(name: 'WEB_ECR_REPOSITORY', defaultValue: '', description: 'Optional override. Empty derives <account>.dkr.ecr.<region>.amazonaws.com/<NAME_PREFIX>-web.')
+    string(name: 'API_ECR_REPOSITORY', defaultValue: '', description: 'Optional override. Empty derives <account>.dkr.ecr.<region>.amazonaws.com/<NAME_PREFIX>-api.')
     string(name: 'ECS_CLUSTER', defaultValue: 'ecs-release-console-prod', description: 'ECS cluster name.')
     string(name: 'WEB_ECS_SERVICE', defaultValue: 'ecs-release-console-prod-web', description: 'Web ECS service name.')
     string(name: 'API_ECS_SERVICE', defaultValue: 'ecs-release-console-prod-api', description: 'API ECS service name.')
-    string(name: 'APPLICATION_URL', defaultValue: '', description: 'ALB application URL used for smoke tests.')
+    string(name: 'APPLICATION_URL', defaultValue: '', description: 'Optional override. Empty derives http://<DNS name of NAME_PREFIX-alb>. Set this when HTTPS and a custom domain are configured.')
     string(name: 'APP_ENVIRONMENT', defaultValue: 'prod', description: 'Environment reported by the API.')
     string(name: 'APP_VERSION', defaultValue: '0.1.0', description: 'Human-readable release version.')
   }
 
   environment {
+    // Keep NODE_IMAGE aligned with the build stage in apps/*/Dockerfile.
+    // The controller has no Node.js installed; validation runs in this image.
+    NODE_IMAGE  = 'node:24.14.0-alpine3.23'
     TRIVY_IMAGE = 'aquasec/trivy:0.66.0'
   }
 
@@ -39,8 +45,42 @@ pipeline {
             returnStdout: true
           ).trim()
           env.IMAGE_TAG = "sha-${env.COMMIT_SHA}"
-          env.WEB_IMAGE_URI = "${params.WEB_ECR_REPOSITORY}:${env.IMAGE_TAG}"
-          env.API_IMAGE_URI = "${params.API_ECR_REPOSITORY}:${env.IMAGE_TAG}"
+        }
+      }
+    }
+
+    stage('Resolve release targets') {
+      steps {
+        script {
+          def accountId = sh(
+            script: 'aws sts get-caller-identity --query Account --output text',
+            returnStdout: true
+          ).trim()
+          def registry = "${accountId}.dkr.ecr.${params.AWS_REGION}.amazonaws.com"
+
+          env.RELEASE_WEB_REPOSITORY = params.WEB_ECR_REPOSITORY?.trim() ?: "${registry}/${params.NAME_PREFIX}-web"
+          env.RELEASE_API_REPOSITORY = params.API_ECR_REPOSITORY?.trim() ?: "${registry}/${params.NAME_PREFIX}-api"
+
+          if (params.APPLICATION_URL?.trim()) {
+            env.RELEASE_APPLICATION_URL = params.APPLICATION_URL.trim()
+          } else {
+            def albDnsName = sh(
+              script: '''aws elbv2 describe-load-balancers \
+                --region "${AWS_REGION}" \
+                --names "${NAME_PREFIX}-alb" \
+                --query 'LoadBalancers[0].DNSName' \
+                --output text''',
+              returnStdout: true
+            ).trim()
+            env.RELEASE_APPLICATION_URL = "http://${albDnsName}"
+          }
+
+          env.WEB_IMAGE_URI = "${env.RELEASE_WEB_REPOSITORY}:${env.IMAGE_TAG}"
+          env.API_IMAGE_URI = "${env.RELEASE_API_REPOSITORY}:${env.IMAGE_TAG}"
+
+          echo "Web image: ${env.WEB_IMAGE_URI}"
+          echo "API image: ${env.API_IMAGE_URI}"
+          echo "Smoke-test URL: ${env.RELEASE_APPLICATION_URL}"
         }
       }
     }
@@ -49,9 +89,10 @@ pipeline {
       steps {
         sh '''
           set -Eeuo pipefail
-          test -n "${WEB_ECR_REPOSITORY}"
-          test -n "${API_ECR_REPOSITORY}"
-          test -n "${APPLICATION_URL}"
+          test -n "${RELEASE_WEB_REPOSITORY}"
+          test -n "${RELEASE_API_REPOSITORY}"
+          test -n "${RELEASE_APPLICATION_URL}"
+          test "${RELEASE_APPLICATION_URL}" != "http://None"
           aws sts get-caller-identity
           aws ecs describe-services \
             --region "${AWS_REGION}" \
@@ -65,11 +106,17 @@ pipeline {
 
     stage('Application tests') {
       steps {
+        // Run as the Jenkins user so deleteDir() can remove node_modules later.
         sh '''
           set -Eeuo pipefail
-          npm ci --prefix apps/api
-          npm ci --prefix apps/web
-          npm run validate
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
+            --env npm_config_cache=/tmp/.npm \
+            --volume "${WORKSPACE}:/workspace" \
+            --workdir /workspace \
+            "${NODE_IMAGE}" \
+            sh -c 'npm run install:all && npm run validate'
         '''
       }
     }
@@ -119,8 +166,8 @@ pipeline {
           set -Eeuo pipefail
           SKIP_BUILD=true scripts/build-and-push.sh \
             "${AWS_REGION}" \
-            "${WEB_ECR_REPOSITORY}" \
-            "${API_ECR_REPOSITORY}" \
+            "${RELEASE_WEB_REPOSITORY}" \
+            "${RELEASE_API_REPOSITORY}" \
             "${COMMIT_SHA}"
         '''
       }
@@ -182,7 +229,7 @@ pipeline {
             --cluster "${ECS_CLUSTER}" \
             --services "${API_ECS_SERVICE}" "${WEB_ECS_SERVICE}"
 
-          scripts/smoke-test.sh "${APPLICATION_URL}" "${COMMIT_SHA}"
+          scripts/smoke-test.sh "${RELEASE_APPLICATION_URL}" "${COMMIT_SHA}"
           trap - ERR
         '''
       }

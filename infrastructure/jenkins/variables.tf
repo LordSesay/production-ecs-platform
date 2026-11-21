@@ -45,7 +45,7 @@ variable "root_volume_size_gib" {
 }
 
 variable "jenkins_version" {
-  description = "Jenkins RPM package version. Set null to install the current LTS package."
+  description = "Jenkins RPM package version (2.541.1 or newer, which the bootstrap's 2026 signing key covers). Set null to install the current LTS package."
   type        = string
   default     = null
 }

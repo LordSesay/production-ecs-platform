@@ -96,6 +96,12 @@ resource "aws_iam_role_policy" "release" {
         Resource = values(data.terraform_remote_state.foundation.outputs.ecr_repository_arns)
       },
       {
+        Sid      = "DiscoverApplicationUrl"
+        Effect   = "Allow"
+        Action   = ["elasticloadbalancing:DescribeLoadBalancers"]
+        Resource = "*"
+      },
+      {
         Sid    = "ReadAndRegisterTaskDefinitions"
         Effect = "Allow"
         Action = [

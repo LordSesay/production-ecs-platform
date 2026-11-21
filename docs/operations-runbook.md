@@ -99,15 +99,28 @@ the existence of a Terraform policy.
 
 ## Destruction order
 
-Remove resources in reverse dependency order:
+Use the ordered teardown, which keeps every `terraform destroy` interactive:
 
 ```bash
-terraform -chdir=infrastructure/jenkins destroy
-terraform -chdir=infrastructure/workload destroy
-terraform -chdir=infrastructure/foundation destroy
+export AWS_REGION="us-east-1"
+export TF_STATE_BUCKET="your-state-bucket"
+export PROJECT_NAME="ecs-release-console"
+export ENVIRONMENT="prod"
+export CONFIRM_DESTROY="ecs-release-console-prod"   # must equal <project>-<environment>
+
+scripts/teardown-platform.sh
 ```
 
-The state bucket is protected by `prevent_destroy`. Retain it for audit and
-recovery, or remove the protection only after confirming all downstream state
-is no longer needed. ECR repositories use `force_delete = false`; delete images
-deliberately before destroying the foundation.
+It runs, in order:
+
+1. `jenkins` destroy
+2. `workload` destroy, passing the currently running image URIs, because the
+   stack's `aws_ecr_image` lookups need existing tags even during destroy
+   (override with `WEB_IMAGE_URI` / `API_IMAGE_URI` if the services are gone)
+3. ECR image purge, required because repositories use `force_delete = false`
+4. `foundation` destroy
+
+The state bucket is protected by `prevent_destroy` and is retained. Remove the
+protection only after confirming no downstream state is needed. The logs KMS
+key enters a 7-day pending-deletion window. If `enable_deletion_protection` was
+set to `true`, set it back to `false` and apply before tearing down.

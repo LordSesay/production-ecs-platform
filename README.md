@@ -87,6 +87,7 @@ scripts/
   deploy-service.sh          New ECS task revision registration
   rollback-service.sh        Explicit task revision rollback
   smoke-test.sh              ALB and deployed-commit verification
+  teardown-platform.sh       Ordered destroy; retains the state bucket
 Jenkinsfile                  Repeatable application release pipeline
 docs/                        Architecture, setup, operations, evidence
 ```
@@ -138,7 +139,9 @@ scripts/bootstrap-platform.sh
 
 This environment creates billable AWS resources, including a NAT gateway, ALB,
 Fargate tasks, ECR storage, CloudWatch logs, and an EC2 Jenkins controller.
-Review every plan and destroy lab resources when they are no longer required.
+Review every plan and destroy lab resources when they are no longer required
+with `scripts/teardown-platform.sh` (see the
+[operations runbook](docs/operations-runbook.md#destruction-order)).
 
 ## Engineering boundary
 

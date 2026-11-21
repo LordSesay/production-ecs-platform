@@ -2,6 +2,10 @@ services:
   api:
     build:
       context: ./apps/api
+    # Mirror the ECS task definition: read-only root filesystem, writable /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       APP_ENVIRONMENT: local
       APP_VERSION: compose
@@ -21,6 +25,9 @@ services:
   web:
     build:
       context: ./apps/web
+    read_only: true
+    tmpfs:
+      - /tmp
     depends_on:
       api:
         condition: service_healthy

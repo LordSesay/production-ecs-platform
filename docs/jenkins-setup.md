@@ -84,21 +84,32 @@ For a public repository, no Git credential is needed. For a private repository,
 store a narrow GitHub credential in Jenkins and bind it only to the SCM
 checkout. Never place a GitHub token in the repository or Jenkinsfile.
 
-## 5. Configure pipeline parameters
+## 5. Pipeline parameters
 
-The first run exposes parameters. Populate them from Terraform outputs:
+SCM-polled builds always run with the defaults in the `Jenkinsfile`, and values
+typed into the Jenkins UI do not carry over to them. The defaults therefore have
+to work without operator input:
 
-| Parameter | Source |
-|---|---|
-| `AWS_REGION` | Foundation Region |
-| `WEB_ECR_REPOSITORY` | `ecr_repository_urls.web` |
-| `API_ECR_REPOSITORY` | `ecr_repository_urls.api` |
-| `ECS_CLUSTER` | `ecs_cluster_name` |
-| `WEB_ECS_SERVICE` | Workload `service_names.web` |
-| `API_ECS_SERVICE` | Workload `service_names.api` |
-| `APPLICATION_URL` | Workload `application_url` |
-| `APP_ENVIRONMENT` | `prod` |
-| `APP_VERSION` | Release version |
+| Parameter | Default behavior | Must match |
+|---|---|---|
+| `AWS_REGION` | `us-east-1` | Foundation Region |
+| `NAME_PREFIX` | `ecs-release-console-prod` | Foundation `name_prefix` output |
+| `WEB_ECR_REPOSITORY` | Empty: derived from the instance-role account, Region, and `NAME_PREFIX` | `ecr_repository_urls.web` |
+| `API_ECR_REPOSITORY` | Empty: derived the same way | `ecr_repository_urls.api` |
+| `ECS_CLUSTER` | `ecs-release-console-prod` | `ecs_cluster_name` |
+| `WEB_ECS_SERVICE` / `API_ECS_SERVICE` | `<NAME_PREFIX>-web` / `-api` | Workload `service_names` |
+| `APPLICATION_URL` | Empty: `http://` plus the DNS name of `<NAME_PREFIX>-alb` | Workload `application_url` |
+| `APP_ENVIRONMENT` | `prod` | Workload `environment` |
+| `APP_VERSION` | `0.1.0` | Release version |
+
+If you change `project_name` or `environment`, or enable HTTPS with a custom
+domain, change the matching defaults in the `Jenkinsfile` and commit them. The
+**Resolve release targets** stage prints the resolved image URIs and smoke-test
+URL; compare them with the Terraform outputs on the first build.
+
+Application validation runs inside the pinned `NODE_IMAGE` container because
+the controller has no Node.js installed. Keep it aligned with the build stage of
+`apps/*/Dockerfile`.
 
 ## 6. Trigger behavior
 
